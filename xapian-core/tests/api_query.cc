@@ -1495,3 +1495,41 @@ DEFINE_TESTCASE(estimateopbug2, backend && !remote) {
     } catch (const Exception_estimateop2&) {
     }
 }
+
+/// Regression test for bug in AndNotPostList::skip_to() fixed after 2.1.0.
+DEFINE_TESTCASE(boolandnotbug1, backend) {
+    Xapian::Database db = get_database("boolandnotbug1",
+                                       [](Xapian::WritableDatabase& wdb,
+                                          const string&)
+                                       {
+                                           Xapian::Document doc;
+                                           doc.add_term("A");
+                                           doc.add_term("B");
+                                           doc.add_term("D");
+                                           wdb.add_document(doc);
+                                           Xapian::Document doc2;
+                                           doc2.add_term("C");
+                                           wdb.add_document(doc2);
+                                           Xapian::Document doc3;
+                                           doc3.add_term("A");
+                                           doc3.add_term("D");
+                                           wdb.add_document(doc3);
+                                           // More docs matching just C, so
+                                           // that D has the lower termfreq,
+                                           // the AND advances it first and
+                                           // calls skip_to() on the OR.
+                                           wdb.add_document(doc2);
+                                           wdb.add_document(doc2);
+                                       });
+    Xapian::Query q = (Xapian::Query("A") &~ Xapian::Query("B")) |
+                      Xapian::Query("C");
+    q &= Xapian::Query("D");
+    Xapian::Enquire enq(db);
+    enq.set_query(q);
+    mset_expect_order(enq.get_mset(0, 10), 3);
+    // With BoolWeight the OR is a BoolOrPostList, which calls skip_to() on
+    // the AND_NOT before it has been positioned, and the AND_NOT used to
+    // return docid 1 without checking it against the right side.
+    enq.set_weighting_scheme(Xapian::BoolWeight());
+    mset_expect_order(enq.get_mset(0, 10), 3);
+}

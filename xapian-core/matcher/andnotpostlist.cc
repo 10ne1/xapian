@@ -66,40 +66,42 @@ AndNotPostList::next(double w_min)
 PostList*
 AndNotPostList::skip_to(Xapian::docid did, double w_min)
 {
-    if (did > pl->get_docid()) {
-        PostList* result = pl->skip_to(did, w_min);
+    // We can't skip the work here when did <= pl->get_docid(): before we've
+    // been positioned, get_docid() is unspecified, and a leaf postlist may
+    // already return its first docid, which r hasn't yet been checked
+    // against.  pl->skip_to() does nothing if pl is already at or past did.
+    PostList* result = pl->skip_to(did, w_min);
+    if (result) {
+        delete pl;
+        pl = result;
+    }
+    if (pl->at_end()) {
+        result = pl;
+        pl = nullptr;
+        return result;
+    }
+    Xapian::docid l_did = pl->get_docid();
+    if (l_did > r_did) {
+        bool r_valid;
+        result = r->check(l_did, 0, r_valid);
         if (result) {
-            delete pl;
-            pl = result;
+            delete r;
+            r = result;
         }
-        if (pl->at_end()) {
+        if (!r_valid)
+            return nullptr;
+        if (r->at_end()) {
             result = pl;
-            pl = NULL;
+            pl = nullptr;
             return result;
         }
-        Xapian::docid l_did = pl->get_docid();
-        if (l_did > r_did) {
-            bool r_valid;
-            result = r->check(l_did, 0, r_valid);
-            if (result) {
-                delete r;
-                r = result;
-            }
-            if (!r_valid)
-                return NULL;
-            if (r->at_end()) {
-                result = pl;
-                pl = NULL;
-                return result;
-            }
-            r_did = r->get_docid();
-        }
-        if (l_did == r_did) {
-            // Advance to the next match.
-            return AndNotPostList::next(w_min);
-        }
+        r_did = r->get_docid();
     }
-    return NULL;
+    if (l_did == r_did) {
+        // Advance to the next match.
+        return AndNotPostList::next(w_min);
+    }
+    return nullptr;
 }
 
 PostList*
